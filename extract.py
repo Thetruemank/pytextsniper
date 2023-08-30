@@ -11,9 +11,14 @@ import pygetwindow as gw
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 
+from PyQt5.QtGui import QImage
+
 def capture_screen():
     screen = np.array(ig.grab(bbox=None))
-    return cv2.cvtColor(screen, cv2.COLOR_RGB2BGR)
+    screen = cv2.cvtColor(screen, cv2.COLOR_RGB2BGR)
+    height, width, channel = screen.shape
+    bytesPerLine = 3 * width
+    return QImage(screen.data, width, height, bytesPerLine, QImage.Format_RGB888).rgbSwapped()
 
 
 def preprocess_image(image):
@@ -31,13 +36,23 @@ def preprocess_image(image):
 
     return dilated
 
-def extract_text(image):
-    if image is None or image.size == 0:
-        return ""
+from PyQt5.QtCore import QThread, pyqtSignal
 
-    preprocessed = preprocess_image(image)
-    text = pytesseract.image_to_string(preprocessed)
-    return text
+class TextExtractor(QThread):
+    text_extracted = pyqtSignal(str)
+
+    def __init__(self, image):
+        super().__init__()
+        self.image = image
+
+    def run(self):
+        if self.image is None or self.image.size == 0:
+            self.text_extracted.emit("")
+            return
+
+        preprocessed = preprocess_image(self.image)
+        text = pytesseract.image_to_string(preprocessed)
+        self.text_extracted.emit(text)
 
 
 def draw_rounded_rectangle(image, rect_coords, color, thickness, radius, transparency):
@@ -64,73 +79,11 @@ def draw_rounded_rectangle(image, rect_coords, color, thickness, radius, transpa
 
     return image
         
+
 def draw_rectangle(image):
     # Create a separate window to display the image and handle the mouse events
     window_name = "Image"
     cv2.namedWindow(window_name)
-
-    # Initialize a variable to store the coordinates of the rectangle
-    rect_coords = []
-
-    # Define a function to handle mouse events
-    def mouse_callback(event, x, y, flags, param):
-        nonlocal rect_coords
-
-        # If the left mouse button is pressed, record the starting coordinates of the rectangle
-        if event == cv2.EVENT_LBUTTONDOWN:
-            rect_coords[:] = [x, y, x, y]
-
-        # If the left mouse button is moved, update the ending coordinates of the rectangle
-        elif event == cv2.EVENT_MOUSEMOVE and flags == cv2.EVENT_FLAG_LBUTTON:
-            rect_coords[2:] = [x, y]
-
-        # If the left mouse button is released, record the ending coordinates of the rectangle
-        elif event == cv2.EVENT_LBUTTONUP:
-            rect_coords[2:] = [x, y]
-            cropped_image = image[rect_coords[1]                                  :rect_coords[3], rect_coords[0]:rect_coords[2]]
-            text = extract_text(cropped_image)
-
-        if text and text.strip():  # Check if the extracted text is not empty
-            pyperclip.copy(text)
-            print("Text copied to clipboard:", text)
-
-    # Add the mouse event listener to the window
-    cv2.setMouseCallback("Image", mouse_callback)
-
-    while True:
-        # Create a copy of the original image to avoid modifying it
-        image_copy = image.copy()
-
-        # Draw the rounded rectangle on the image copy if the coordinates are available
-        if len(rect_coords) >= 4:
-            color = (127, 127, 127)  # Grey color
-            thickness = 2
-            radius = 10  # Change this value to control the roundness of the rectangle's corners
-            image_copy = draw_rounded_rectangle(image_copy, rect_coords, color, thickness, radius, transparency=0.9)
-
-        # Show the image with the rounded rectangle
-        cv2.imshow(window_name, image_copy)
-
-        # Try to bring the window to the front
-        windows = gw.getWindowsWithTitle(window_name)
-        if windows:
-            window = windows[0]
-            try:
-                window.activate()
-            except gw.PyGetWindowException as e:
-                print("Error activating window:", e)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    cv2.destroyAllWindows()
-
-    return image
-        
-        def draw_rectangle(image):
-        # Create a separate window to display the image and handle the mouse events
-        window_name = "Image"
-        cv2.namedWindow(window_name)
 
     # Draw the outer rounded rectangle
     rect_img = np.zeros_like(image)
@@ -156,15 +109,13 @@ def draw_rectangle(image):
 
 
 
+from PyQt5.QtWidgets import QApplication
+
 def main():
-    # Wait for the Print Screen key to be pressed
-    keyboard.wait('print_screen')
-
-    # Capture the screen
-    screen = capture_screen()
-
-    # Draw a rectangle over the area with text and extract the text
-    draw_rectangle(screen)
+    app = QApplication([])
+    window = MainWindow()
+    window.show()
+    app.exec_()
 
 
 if __name__ == "__main__":
