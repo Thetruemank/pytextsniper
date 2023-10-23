@@ -6,6 +6,7 @@ import pytesseract
 import keyboard
 import threading
 import pygetwindow as gw
+from deskew import skew_correction
 
 # Set the path to the Tesseract executable file
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -16,6 +17,20 @@ def capture_screen():
     return cv2.cvtColor(screen, cv2.COLOR_RGB2BGR)
 
 
+def improve_image_quality(image):
+    # Remove noise from the image
+    denoised = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
+
+    # Correct the skew of the image
+    corrected = skew_correction(denoised)
+
+    # Perform morphological operations
+    kernel = np.ones((5,5),np.uint8)
+    opened = cv2.morphologyEx(corrected, cv2.MORPH_OPEN, kernel)
+    closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel)
+
+    return closed
+
 def preprocess_image(image):
     # Convert the image to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -23,8 +38,11 @@ def preprocess_image(image):
     # Apply a Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
+    # Apply bilateral filter for smoothing
+    smooth = cv2.bilateralFilter(blurred, 9, 75, 75)
+
     # Apply adaptive thresholding to convert the image to black and white
-    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    thresh = cv2.adaptiveThreshold(smooth, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
 
     # Dilate the image to join parts of the text that might have been separated due to the background
     dilated = cv2.dilate(thresh, None, iterations=2)
@@ -35,10 +53,14 @@ def extract_text(image):
     if image is None or image.size == 0:
         return ""
 
-    preprocessed = preprocess_image(image)
-    text = pytesseract.image_to_string(preprocessed)
+    improved = improve_image_quality(image)
+    preprocessed = preprocess_image(improved)
+    data = pytesseract.image_to_data(preprocessed, output_type=pytesseract.Output.DICT)
+    
+    # Filter out the text with low confidence levels and short length
+    text = " ".join([data['text'][i] for i in range(len(data['conf'])) if int(data['conf'][i]) > 60 and len(data['text'][i]) > 2])
+    
     return text
-
 
 def draw_rounded_rectangle(image, rect_coords, color, thickness, radius, transparency):
     # Draw the outer rounded rectangle
