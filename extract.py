@@ -25,11 +25,12 @@ def improve_image_quality(image):
     corrected = skew_correction(denoised)
 
     # Perform morphological operations
-    kernel = np.ones((5,5),np.uint8)
+    kernel = np.ones((5, 5), np.uint8)
     opened = cv2.morphologyEx(corrected, cv2.MORPH_OPEN, kernel)
     closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel)
 
     return closed
+
 
 def preprocess_image(image):
     # Convert the image to grayscale
@@ -49,6 +50,7 @@ def preprocess_image(image):
 
     return dilated
 
+
 def extract_text(image):
     if image is None or image.size == 0:
         return ""
@@ -61,6 +63,7 @@ def extract_text(image):
     text = " ".join([data['text'][i] for i in range(len(data['conf'])) if int(data['conf'][i]) > 60 and len(data['text'][i]) > 2])
     
     return text
+
 
 def draw_rounded_rectangle(image, rect_coords, color, thickness, radius, transparency):
     # Draw the outer rounded rectangle
@@ -85,7 +88,8 @@ def draw_rounded_rectangle(image, rect_coords, color, thickness, radius, transpa
     cv2.circle(image, (rect_coords[2] - radius, rect_coords[3] - radius), radius, color, -1)
 
     return image
-        
+
+
 def draw_rectangle(image):
     # Create a separate window to display the image and handle the mouse events
     window_name = "Image"
@@ -148,34 +152,6 @@ def draw_rectangle(image):
     cv2.destroyAllWindows()
 
     return image
-        
-        def draw_rectangle(image):
-        # Create a separate window to display the image and handle the mouse events
-        window_name = "Image"
-        cv2.namedWindow(window_name)
-
-    # Draw the outer rounded rectangle
-    rect_img = np.zeros_like(image)
-    cv2.rectangle(rect_img, (x1 + radius, y1 + radius), (x2 - radius, y2 - radius), color, -1)
-    cv2.circle(rect_img, (x1 + radius, y1 + radius), radius, color, -1)
-    cv2.circle(rect_img, (x1 + radius, y2 - radius), radius, color, -1)
-    cv2.circle(rect_img, (x2 - radius, y1 + radius), radius, color, -1)
-    cv2.circle(rect_img, (x2 - radius, y2 - radius), radius, color, -1)
-
-    # Combine the original image with the rounded rectangle
-    image = cv2.addWeighted(image, transparency, rect_img, 1 - transparency, 0)
-
-    # Draw the outer border
-    cv2.rectangle(image, (x1 + radius, y1), (x2 - radius, y1 + thickness), color, -1)
-    cv2.rectangle(image, (x1 + radius, y2 - thickness), (x2 - radius, y2), color, -1)
-    cv2.rectangle(image, (x1, y1 + radius), (x1 + thickness, y2 - radius), color, -1)
-    cv2.rectangle(image, (x2 - thickness, y1 + radius), (x2, y2 - radius), color, -1)
-    cv2.circle(image, (x1 + radius, y1 + radius), radius, color, -1)
-    cv2.circle(image, (x1 + radius, y2 - radius), radius, color, -1)
-    cv2.circle(image, (x2 - radius, y1 + radius), radius, color, -1)
-    cv2.circle(image, (x2 - radius, y2 - radius), radius, color, -1)
-
-
 
 
 def main():
