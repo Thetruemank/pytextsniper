@@ -1,11 +1,13 @@
-from PIL import ImageGrab as ig
+import threading
+
 import cv2
+import keyboard
 import numpy as np
+import pygetwindow as gw
 import pyperclip
 import pytesseract
-import keyboard
-import threading
-import pygetwindow as gw
+from deskew import skew_correction
+from PIL import ImageGrab as ig
 
 # Set the path to the Tesseract executable file
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -16,6 +18,21 @@ def capture_screen():
     return cv2.cvtColor(screen, cv2.COLOR_RGB2BGR)
 
 
+def improve_image_quality(image):
+    # Remove noise from the image
+    denoised = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
+
+    # Correct the skew of the image
+    corrected = skew_correction(denoised)
+
+    # Perform morphological operations
+    kernel = np.ones((5, 5), np.uint8)
+    opened = cv2.morphologyEx(corrected, cv2.MORPH_OPEN, kernel)
+    closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel)
+
+    return closed
+
+
 def preprocess_image(image):
     # Convert the image to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -23,47 +40,111 @@ def preprocess_image(image):
     # Apply a Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
+    # Apply bilateral filter for smoothing
+    smooth = cv2.bilateralFilter(blurred, 9, 75, 75)
+
     # Apply adaptive thresholding to convert the image to black and white
-    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    thresh = cv2.adaptiveThreshold(
+        smooth, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+    )
 
     # Dilate the image to join parts of the text that might have been separated due to the background
     dilated = cv2.dilate(thresh, None, iterations=2)
 
     return dilated
 
+
 def extract_text(image):
     if image is None or image.size == 0:
         return ""
 
-    preprocessed = preprocess_image(image)
-    text = pytesseract.image_to_string(preprocessed)
+    improved = improve_image_quality(image)
+    preprocessed = preprocess_image(improved)
+    data = pytesseract.image_to_data(preprocessed, output_type=pytesseract.Output.DICT)
+
+    # Filter out the text with low confidence levels and short length
+    text = " ".join(
+        [
+            data["text"][i]
+            for i in range(len(data["conf"]))
+            if int(data["conf"][i]) > 60 and len(data["text"][i]) > 2
+        ]
+    )
+
     return text
 
 
 def draw_rounded_rectangle(image, rect_coords, color, thickness, radius, transparency):
     # Draw the outer rounded rectangle
     rect_img = np.zeros_like(image)
-    cv2.rectangle(rect_img, (rect_coords[0] + radius, rect_coords[1] + radius), (rect_coords[2] - radius, rect_coords[3] - radius), color, -1)
-    cv2.circle(rect_img, (rect_coords[0] + radius, rect_coords[1] + radius), radius, color, -1)
-    cv2.circle(rect_img, (rect_coords[0] + radius, rect_coords[3] - radius), radius, color, -1)
-    cv2.circle(rect_img, (rect_coords[2] - radius, rect_coords[1] + radius), radius, color, -1)
-    cv2.circle(rect_img, (rect_coords[2] - radius, rect_coords[3] - radius), radius, color, -1)
+    cv2.rectangle(
+        rect_img,
+        (rect_coords[0] + radius, rect_coords[1] + radius),
+        (rect_coords[2] - radius, rect_coords[3] - radius),
+        color,
+        -1,
+    )
+    cv2.circle(
+        rect_img, (rect_coords[0] + radius, rect_coords[1] + radius), radius, color, -1
+    )
+    cv2.circle(
+        rect_img, (rect_coords[0] + radius, rect_coords[3] - radius), radius, color, -1
+    )
+    cv2.circle(
+        rect_img, (rect_coords[2] - radius, rect_coords[1] + radius), radius, color, -1
+    )
+    cv2.circle(
+        rect_img, (rect_coords[2] - radius, rect_coords[3] - radius), radius, color, -1
+    )
 
     # Combine the original image with the rounded rectangle
     image = cv2.addWeighted(image, transparency, rect_img, 1 - transparency, 0)
 
     # Draw the outer border
-    cv2.rectangle(image, (rect_coords[0] + radius, rect_coords[1]), (rect_coords[2] - radius, rect_coords[1] + thickness), color, -1)
-    cv2.rectangle(image, (rect_coords[0] + radius, rect_coords[3] - thickness), (rect_coords[2] - radius, rect_coords[3]), color, -1)
-    cv2.rectangle(image, (rect_coords[0], rect_coords[1] + radius), (rect_coords[0] + thickness, rect_coords[3] - radius), color, -1)
-    cv2.rectangle(image, (rect_coords[2] - thickness, rect_coords[1] + radius), (rect_coords[2], rect_coords[3] - radius), color, -1)
-    cv2.circle(image, (rect_coords[0] + radius, rect_coords[1] + radius), radius, color, -1)
-    cv2.circle(image, (rect_coords[0] + radius, rect_coords[3] - radius), radius, color, -1)
-    cv2.circle(image, (rect_coords[2] - radius, rect_coords[1] + radius), radius, color, -1)
-    cv2.circle(image, (rect_coords[2] - radius, rect_coords[3] - radius), radius, color, -1)
+    cv2.rectangle(
+        image,
+        (rect_coords[0] + radius, rect_coords[1]),
+        (rect_coords[2] - radius, rect_coords[1] + thickness),
+        color,
+        -1,
+    )
+    cv2.rectangle(
+        image,
+        (rect_coords[0] + radius, rect_coords[3] - thickness),
+        (rect_coords[2] - radius, rect_coords[3]),
+        color,
+        -1,
+    )
+    cv2.rectangle(
+        image,
+        (rect_coords[0], rect_coords[1] + radius),
+        (rect_coords[0] + thickness, rect_coords[3] - radius),
+        color,
+        -1,
+    )
+    cv2.rectangle(
+        image,
+        (rect_coords[2] - thickness, rect_coords[1] + radius),
+        (rect_coords[2], rect_coords[3] - radius),
+        color,
+        -1,
+    )
+    cv2.circle(
+        image, (rect_coords[0] + radius, rect_coords[1] + radius), radius, color, -1
+    )
+    cv2.circle(
+        image, (rect_coords[0] + radius, rect_coords[3] - radius), radius, color, -1
+    )
+    cv2.circle(
+        image, (rect_coords[2] - radius, rect_coords[1] + radius), radius, color, -1
+    )
+    cv2.circle(
+        image, (rect_coords[2] - radius, rect_coords[3] - radius), radius, color, -1
+    )
 
     return image
-        
+
+
 def draw_rectangle(image):
     # Create a separate window to display the image and handle the mouse events
     window_name = "Image"
@@ -87,7 +168,9 @@ def draw_rectangle(image):
         # If the left mouse button is released, record the ending coordinates of the rectangle
         elif event == cv2.EVENT_LBUTTONUP:
             rect_coords[2:] = [x, y]
-            cropped_image = image[rect_coords[1]                                  :rect_coords[3], rect_coords[0]:rect_coords[2]]
+            cropped_image = image[
+                rect_coords[1] : rect_coords[3], rect_coords[0] : rect_coords[2]
+            ]
             text = extract_text(cropped_image)
 
         if text and text.strip():  # Check if the extracted text is not empty
@@ -106,7 +189,9 @@ def draw_rectangle(image):
             color = (127, 127, 127)  # Grey color
             thickness = 2
             radius = 10  # Change this value to control the roundness of the rectangle's corners
-            image_copy = draw_rounded_rectangle(image_copy, rect_coords, color, thickness, radius, transparency=0.9)
+            image_copy = draw_rounded_rectangle(
+                image_copy, rect_coords, color, thickness, radius, transparency=0.9
+            )
 
         # Show the image with the rounded rectangle
         cv2.imshow(window_name, image_copy)
@@ -120,45 +205,17 @@ def draw_rectangle(image):
             except gw.PyGetWindowException as e:
                 print("Error activating window:", e)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     cv2.destroyAllWindows()
 
     return image
-        
-        def draw_rectangle(image):
-        # Create a separate window to display the image and handle the mouse events
-        window_name = "Image"
-        cv2.namedWindow(window_name)
-
-    # Draw the outer rounded rectangle
-    rect_img = np.zeros_like(image)
-    cv2.rectangle(rect_img, (x1 + radius, y1 + radius), (x2 - radius, y2 - radius), color, -1)
-    cv2.circle(rect_img, (x1 + radius, y1 + radius), radius, color, -1)
-    cv2.circle(rect_img, (x1 + radius, y2 - radius), radius, color, -1)
-    cv2.circle(rect_img, (x2 - radius, y1 + radius), radius, color, -1)
-    cv2.circle(rect_img, (x2 - radius, y2 - radius), radius, color, -1)
-
-    # Combine the original image with the rounded rectangle
-    image = cv2.addWeighted(image, transparency, rect_img, 1 - transparency, 0)
-
-    # Draw the outer border
-    cv2.rectangle(image, (x1 + radius, y1), (x2 - radius, y1 + thickness), color, -1)
-    cv2.rectangle(image, (x1 + radius, y2 - thickness), (x2 - radius, y2), color, -1)
-    cv2.rectangle(image, (x1, y1 + radius), (x1 + thickness, y2 - radius), color, -1)
-    cv2.rectangle(image, (x2 - thickness, y1 + radius), (x2, y2 - radius), color, -1)
-    cv2.circle(image, (x1 + radius, y1 + radius), radius, color, -1)
-    cv2.circle(image, (x1 + radius, y2 - radius), radius, color, -1)
-    cv2.circle(image, (x2 - radius, y1 + radius), radius, color, -1)
-    cv2.circle(image, (x2 - radius, y2 - radius), radius, color, -1)
-
-
 
 
 def main():
     # Wait for the Print Screen key to be pressed
-    keyboard.wait('print_screen')
+    keyboard.wait("print_screen")
 
     # Capture the screen
     screen = capture_screen()
