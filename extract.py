@@ -29,14 +29,21 @@ def preprocess_image(image):
     # Dilate the image to join parts of the text that might have been separated due to the background
     dilated = cv2.dilate(thresh, None, iterations=2)
 
-    return dilated
+    # Apply noise removal with morphological transformations
+    kernel = np.ones((1, 1), np.uint8)
+    opening = cv2.morphologyEx(dilated, cv2.MORPH_OPEN, kernel, iterations=2)
 
-def extract_text(image):
+    # Apply edge detection
+    edges = cv2.Canny(opening, 100, 200)
+
+    return edges
+
+def extract_text(image, lang='eng', ocr_config=''):
     if image is None or image.size == 0:
         return ""
 
     preprocessed = preprocess_image(image)
-    text = pytesseract.image_to_string(preprocessed)
+    text = pytesseract.image_to_string(preprocessed, lang=lang, config=ocr_config)
     return text
 
 
@@ -71,6 +78,7 @@ def draw_rectangle(image):
 
     # Initialize a variable to store the coordinates of the rectangle
     rect_coords = []
+    rectangles = []
 
     # Define a function to handle mouse events
     def mouse_callback(event, x, y, flags, param):
@@ -87,12 +95,7 @@ def draw_rectangle(image):
         # If the left mouse button is released, record the ending coordinates of the rectangle
         elif event == cv2.EVENT_LBUTTONUP:
             rect_coords[2:] = [x, y]
-            cropped_image = image[rect_coords[1]                                  :rect_coords[3], rect_coords[0]:rect_coords[2]]
-            text = extract_text(cropped_image)
-
-        if text and text.strip():  # Check if the extracted text is not empty
-            pyperclip.copy(text)
-            print("Text copied to clipboard:", text)
+            rectangles.append(tuple(rect_coords))
 
     # Add the mouse event listener to the window
     cv2.setMouseCallback("Image", mouse_callback)
@@ -102,11 +105,11 @@ def draw_rectangle(image):
         image_copy = image.copy()
 
         # Draw the rounded rectangle on the image copy if the coordinates are available
-        if len(rect_coords) >= 4:
+        for rect in rectangles:
             color = (127, 127, 127)  # Grey color
             thickness = 2
             radius = 10  # Change this value to control the roundness of the rectangle's corners
-            image_copy = draw_rounded_rectangle(image_copy, rect_coords, color, thickness, radius, transparency=0.9)
+            image_copy = draw_rounded_rectangle(image_copy, rect, color, thickness, radius, transparency=0.9)
 
         # Show the image with the rounded rectangle
         cv2.imshow(window_name, image_copy)
@@ -125,35 +128,26 @@ def draw_rectangle(image):
 
     cv2.destroyAllWindows()
 
+    extracted_text = ""
+    for rect in rectangles:
+        cropped_image = image[rect[1]:rect[3], rect[0]:rect[2]]
+        text = extract_text(cropped_image)
+        if text and text.strip():
+            extracted_text += text + "\n"
+
+    if extracted_text.strip():
+        # Display the extracted text in a separate window
+        cv2.namedWindow("Extracted Text")
+        cv2.imshow("Extracted Text", np.zeros((300, 600, 3), dtype=np.uint8))
+        cv2.displayOverlay("Extracted Text", extracted_text, 0)
+        cv2.waitKey(0)
+        cv2.destroyWindow("Extracted Text")
+
+        # Copy the extracted text to the clipboard
+        pyperclip.copy(extracted_text)
+        print("Text copied to clipboard:", extracted_text)
+
     return image
-        
-        def draw_rectangle(image):
-        # Create a separate window to display the image and handle the mouse events
-        window_name = "Image"
-        cv2.namedWindow(window_name)
-
-    # Draw the outer rounded rectangle
-    rect_img = np.zeros_like(image)
-    cv2.rectangle(rect_img, (x1 + radius, y1 + radius), (x2 - radius, y2 - radius), color, -1)
-    cv2.circle(rect_img, (x1 + radius, y1 + radius), radius, color, -1)
-    cv2.circle(rect_img, (x1 + radius, y2 - radius), radius, color, -1)
-    cv2.circle(rect_img, (x2 - radius, y1 + radius), radius, color, -1)
-    cv2.circle(rect_img, (x2 - radius, y2 - radius), radius, color, -1)
-
-    # Combine the original image with the rounded rectangle
-    image = cv2.addWeighted(image, transparency, rect_img, 1 - transparency, 0)
-
-    # Draw the outer border
-    cv2.rectangle(image, (x1 + radius, y1), (x2 - radius, y1 + thickness), color, -1)
-    cv2.rectangle(image, (x1 + radius, y2 - thickness), (x2 - radius, y2), color, -1)
-    cv2.rectangle(image, (x1, y1 + radius), (x1 + thickness, y2 - radius), color, -1)
-    cv2.rectangle(image, (x2 - thickness, y1 + radius), (x2, y2 - radius), color, -1)
-    cv2.circle(image, (x1 + radius, y1 + radius), radius, color, -1)
-    cv2.circle(image, (x1 + radius, y2 - radius), radius, color, -1)
-    cv2.circle(image, (x2 - radius, y1 + radius), radius, color, -1)
-    cv2.circle(image, (x2 - radius, y2 - radius), radius, color, -1)
-
-
 
 
 def main():
